@@ -1,4 +1,5 @@
 import time
+import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
@@ -8,6 +9,14 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 
+# Import credentials from config file
+try:
+    from config import CREDENTIALS
+    print("Using credentials from config file")
+except ImportError:
+    print("Config file not found. Please create one based on config.example.py")
+    exit(1)
+
 class WebsiteAutomation:
     def __init__(self, url, headless=False):
         """Initialize the automation with the target website URL."""
@@ -16,15 +25,23 @@ class WebsiteAutomation:
         if headless:
             self.options.add_argument("--headless")
         
-        # Add additional options for stability
+        # Performance optimizations
         self.options.add_argument("--no-sandbox")
         self.options.add_argument("--disable-dev-shm-usage")
+        self.options.add_argument("--disable-extensions")
+        self.options.add_argument("--disable-gpu")
+        self.options.add_argument("--disable-infobars")
+        self.options.page_load_strategy = 'eager'  # Don't wait for all resources
         
         # Initialize the WebDriver
         self.driver = webdriver.Chrome(
             service=Service(ChromeDriverManager().install()),
             options=self.options
         )
+        # Set page load timeout
+        self.driver.set_page_load_timeout(15)
+        # Set default script timeout
+        self.driver.set_script_timeout(10)
         
     def start(self):
         """Start the browser and navigate to the website."""
@@ -35,7 +52,7 @@ class WebsiteAutomation:
             print(f"Failed to navigate to {self.url}: {e}")
             self.quit()
     
-    def wait_for_element(self, by, value, timeout=10):
+    def wait_for_element(self, by, value, timeout=5):  # Reduced default timeout
         """Wait for an element to be present on the page."""
         try:
             element = WebDriverWait(self.driver, timeout).until(
@@ -89,39 +106,58 @@ class WebsiteAutomation:
         except Exception as e:
             print(f"Failed to take screenshot: {e}")
     
+    def quick_login(self, email, password):
+        """Optimized method to quickly perform login."""
+        try:
+            # Quick fill email
+            email_field = self.wait_for_element(By.ID, 'email')
+            if email_field:
+                email_field.clear()
+                email_field.send_keys(email)
+            
+            # Quick fill password
+            password_field = self.wait_for_element(By.ID, 'password')
+            if password_field:
+                password_field.clear()
+                password_field.send_keys(password)
+            
+            # Find the exact sign-in button using the class from HTML
+            sign_in_button = self.wait_for_element(
+                By.XPATH, 
+                "//button[contains(@class, 'bg-primary') and contains(text(), 'Sign in')]"
+            )
+            
+            if sign_in_button:
+                sign_in_button.click()
+                print("Clicked Sign in button")
+                return True
+            
+            return False
+        except Exception as e:
+            print(f"Login failed: {e}")
+            return False
+    
     def quit(self):
         """Close the browser and end the session."""
         if self.driver:
             self.driver.quit()
             print("Browser session ended")
 
-# Example usage
+# Clean example usage
 if __name__ == "__main__":
-    # Initialize the automation
-    # bot = WebsiteAutomation("https://lovable.dev")
-    # Should get the URL from csv file
+    # Static URL - will use csv later
+    target_url = "https://lovable.dev/projects/..."
     
-    # Start the browser and navigate to the website
+    # Create bot instance and start
+    bot = WebsiteAutomation(target_url)
     bot.start()
     
-    # Example: Wait for a while to see the page
-    time.sleep(2)
+    # Login with credentials from config
+    success = bot.quick_login(
+        CREDENTIALS.get('email'),
+        CREDENTIALS.get('password')
+    )
     
-    # Example: Fill out a login form
-    # bot.fill_form({
-    #     (By.ID, 'username'): 'your_username',
-    #     (By.ID, 'password'): 'your_password'
-    # })
-    
-    # Example: Click a button
-    # bot.click_element(By.XPATH, "//button[contains(text(), 'Log In')]")
-    
-    # Example: Navigate to another page
-    # bot.navigate_to("https://example.com/another-page")
-    
-    # Example: Take a screenshot
-    # bot.take_screenshot("screenshot.png")
-    
-    # End the session after 10 seconds
-    time.slee(10)
+    # Keep browser open briefly to see results, then close
+    time.sleep(10)
     bot.quit()
