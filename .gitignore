@@ -39,3 +39,6 @@ chromedriver.log
 .vscode/
 *.swp
 *.swo
+
+/chat_extraction_results
+/extraction_results

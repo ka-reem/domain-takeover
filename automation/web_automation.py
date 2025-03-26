@@ -70,12 +70,68 @@ class WebsiteAutomation:
             self.quit()
     
     def navigate_to(self, url):
-        """Navigate to a different URL."""
+        """
+        Navigate to a different URL and ensure the navigation was successful.
+        
+        Args:
+            url: The URL to navigate to
+            
+        Returns:
+            bool: True if navigation was successful, False otherwise
+        """
         try:
+            print(f"Navigating to {url}")
             self.driver.get(url)
-            print(f"Navigated to {url}")
+            
+            # Wait briefly
+            time.sleep(2)
+            
+            # Verify we reached the intended URL or at least the right domain
+            current_url = self.driver.current_url
+            
+            if current_url == url:
+                print(f"Successfully navigated to exact URL: {url}")
+                return True
+            elif url in current_url or (
+                "lovable.dev/projects/" in url and "lovable.dev/projects/" in current_url
+            ):
+                print(f"Navigation partially successful. Landed on: {current_url}")
+                return True
+            else:
+                print(f"Navigation may have been redirected. Current URL: {current_url}")
+                
+                # If we're on the homepage but wanted a specific project, try one more direct navigation
+                if current_url == "https://lovable.dev/" and "projects" in url:
+                    print("Detected redirection to homepage. Trying direct navigation again...")
+                    self.driver.get(url)
+                    time.sleep(3)
+                    
+                    if url in self.driver.current_url or "projects" in self.driver.current_url:
+                        print(f"Second navigation attempt successful. Now at: {self.driver.current_url}")
+                        return True
+                
+                return False
+                
         except Exception as e:
             print(f"Failed to navigate to {url}: {e}")
+            return False
+    
+    def get_current_url(self):
+        """Get the current URL of the browser."""
+        return self.driver.current_url
+    
+    def is_on_correct_page(self, expected_url):
+        """Check if we're on the expected page or at least on a project page."""
+        current_url = self.driver.current_url
+        
+        if current_url == expected_url:
+            return True
+        
+        # Check if we're at least on a project page (useful for handling redirects)
+        if "lovable.dev/projects/" in expected_url and "lovable.dev/projects/" in current_url:
+            return True
+            
+        return False
     
     def quit(self):
         """Close the browser and end the session."""
@@ -178,7 +234,7 @@ class WebsiteAutomation:
             
     def extract_chat_message(self, filename):
         """
-        Extract the first chat message using method3 (using specific CSS path).
+        Extract the first chat message using multiple methods as fallbacks.
         
         Args:
             filename: The file to save the first chat message to
@@ -186,49 +242,115 @@ class WebsiteAutomation:
         Returns:
             bool: True if successful, False otherwise
         """
+        print("Attempting to extract chat message...")
+        
+        # Take a screenshot before attempting extraction (helpful for debugging)
+        pre_extract_screenshot = os.path.splitext(filename)[0] + "_pre_extract.png"
         try:
-            # Using the CSS path that worked best
-            css_selector = "body > div.flex.min-h-0.flex-1.flex-col > div > div.flex.min-h-0.flex-1.flex-col.bg-background > main > div > div > div.relative.inset-y-0.z-40.mr-0.flex.h-full.min-h-0.overflow-x-hidden.bg-background"
+            self.driver.save_screenshot(pre_extract_screenshot)
+            print(f"Saved pre-extraction screenshot to {pre_extract_screenshot}")
+        except Exception as e:
+            print(f"Could not save pre-extraction screenshot: {e}")
+        
+        # Try multiple methods to find chat messages
+        try:
+            # Method 1: Look for ChatMessageContainer class directly (most reliable)
+            print("Method 1: Looking for ChatMessageContainer elements...")
+            message_containers = self.driver.find_elements(By.CSS_SELECTOR, ".ChatMessageContainer")
             
-            # Find the chat container
-            chat_container = self.driver.find_element(By.CSS_SELECTOR, css_selector)
-            
-            if not chat_container:
-                print("Chat container not found using the provided CSS path")
-                return False
-            
-            # Looking for divs with style containing "position: absolute; visibility: visible"
-            visible_elements = self.driver.find_elements(
-                By.XPATH,
-                "//div[contains(@style, 'position: absolute') and contains(@style, 'visibility: visible')]"
-            )
-            
-            if not visible_elements:
-                print("No visible message elements found")
-                return False
-            
-            # Get the first visible element that contains a message
-            for element in visible_elements:
-                # Check if this element contains a message container
-                message_containers = element.find_elements(By.CSS_SELECTOR, ".ChatMessageContainer")
-                if message_containers:
-                    text_content = message_containers[0].text
-                    
-                    # Create directory if it doesn't exist
-                    directory = os.path.dirname(filename)
-                    if directory and not os.path.exists(directory):
-                        os.makedirs(directory)
-                    
-                    # Write content to file
-                    with open(filename, 'w', encoding='utf-8') as file:
-                        file.write(text_content)
-                    
-                    print(f"Successfully saved chat message to {filename}")
+            if message_containers:
+                print(f"Found {len(message_containers)} message containers")
+                # Get the first container (oldest message)
+                text_content = message_containers[0].text
+                if text_content:
+                    self._save_text_to_file(text_content, filename)
                     return True
+            else:
+                print("No ChatMessageContainer elements found")
+                
+            # Method 2: Look for any elements with data-message-id attribute
+            print("Method 2: Looking for elements with data-message-id...")
+            message_elements = self.driver.find_elements(By.CSS_SELECTOR, "[data-message-id]")
             
-            print("No message containers found within visible elements")
+            if message_elements:
+                print(f"Found {len(message_elements)} message elements with data-message-id")
+                # Get the first one
+                text_content = message_elements[0].text
+                if text_content:
+                    self._save_text_to_file(text_content, filename)
+                    return True
+            else:
+                print("No elements with data-message-id found")
+                
+            # Method 3: Look for message content by class names often used in chat interfaces
+            print("Method 3: Looking for message content by class names...")
+            content_classes = [
+                ".prose", ".prose-markdown", ".break-anywhere", ".whitespace-pre-wrap", 
+                ".message-content", ".chat-message", ".user-message"
+            ]
+            
+            for class_selector in content_classes:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, class_selector)
+                if elements:
+                    print(f"Found {len(elements)} elements with selector {class_selector}")
+                    text_content = elements[0].text
+                    if text_content:
+                        self._save_text_to_file(text_content, filename)
+                        return True
+            
+            # Method 4: Last resort - take any visible text from the main area
+            print("Method 4: Taking screenshot and looking for any visible text...")
+            
+            # Look for main content area using a more general selector
+            main_areas = self.driver.find_elements(By.CSS_SELECTOR, "main")
+            if main_areas:
+                for main in main_areas:
+                    try:
+                        # Get all paragraph elements
+                        paragraphs = main.find_elements(By.TAG_NAME, "p")
+                        if paragraphs:
+                            # Collect text from all paragraphs
+                            all_text = "\n".join([p.text for p in paragraphs if p.text])
+                            if all_text:
+                                self._save_text_to_file(all_text, filename)
+                                return True
+                    except Exception as e:
+                        print(f"Error extracting paragraphs: {e}")
+            
+            # Take a screenshot for debugging
+            debug_screenshot = os.path.splitext(filename)[0] + "_debug.png"
+            self.driver.save_screenshot(debug_screenshot)
+            print(f"Saved debug screenshot to {debug_screenshot}")
+            
+            print("All extraction methods failed")
             return False
             
         except Exception as e:
             print(f"Error extracting chat message: {e}")
+            # Take a screenshot for debugging
+            try:
+                debug_screenshot = os.path.splitext(filename)[0] + "_error.png"
+                self.driver.save_screenshot(debug_screenshot)
+                print(f"Saved error screenshot to {debug_screenshot}")
+            except:
+                pass
             return False
+    
+    def _save_text_to_file(self, text_content, filename):
+        """
+        Helper method to save text content to a file.
+        
+        Args:
+            text_content: The text content to save
+            filename: The file to save the text to
+        """
+        # Create directory if it doesn't exist
+        directory = os.path.dirname(filename)
+        if directory and not os.path.exists(directory):
+            os.makedirs(directory)
+        
+        # Write content to file
+        with open(filename, 'w', encoding='utf-8') as file:
+            file.write(text_content)
+        
+        print(f"Successfully saved text content to {filename}")
