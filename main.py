@@ -3,6 +3,9 @@ import os
 import argparse
 import csv
 from urllib.parse import urlparse
+import pyautogui
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 
 try:
     from config import CREDENTIALS, GROQ_API_KEY, GROQ_MODEL
@@ -32,7 +35,7 @@ def read_urls_from_csv(csv_path, limit=None):
     
     return urls
 
-def process_url(url, bot, groq_processor, output_dir, wait_time):
+def process_url(url, bot, groq_processor, output_dir, wait_time, domain_log_file):
     """
     Process a single URL to extract chat messages and generate a URL.
     
@@ -42,6 +45,7 @@ def process_url(url, bot, groq_processor, output_dir, wait_time):
         groq_processor: GroqProcessor instance
         output_dir: Directory to save output
         wait_time: Time to wait for page to load
+        domain_log_file: File to log all domain names
         
     Returns:
         bool: True if successful, False otherwise
@@ -70,18 +74,10 @@ def process_url(url, bot, groq_processor, output_dir, wait_time):
         path_parts = parsed_url.path.strip('/').split('/')
         filename_base = path_parts[-1] if len(path_parts) > 1 else "homepage"
         
-        # File paths
-        text_file = os.path.join(output_dir, f"text_{filename_base}.txt")
-        url_file = os.path.join(output_dir, f"url_{filename_base}.txt")
+        # Extract chat message (memory only, no file saving)
+        extracted_text = bot.extract_chat_message_to_memory()
         
-        # Extract chat message
-        extraction_success = bot.extract_chat_message(text_file)
-        
-        if extraction_success:
-            # Read the extracted text
-            with open(text_file, 'r', encoding='utf-8') as file:
-                extracted_text = file.read()
-                
+        if extracted_text:
             # Generate URL using Groq
             print(f"Generating domain name from extracted text using Groq...")
             generated_domain = groq_processor.generate_url(extracted_text)
@@ -90,12 +86,155 @@ def process_url(url, bot, groq_processor, output_dir, wait_time):
                 # Print the domain name with emphasis
                 print(f"\nDOMAIN NAME: {generated_domain}.com\n")
                 
-                # Save the domain name
-                groq_processor.save_url_to_file(f"{generated_domain}.com", url_file)
+                # Log the domain to the consolidated file with lovable.app suffix
+                with open(domain_log_file, "a", encoding="utf-8") as log_file:
+                    log_file.write(f"{filename_base}: {generated_domain}.lovable.app\n")
                 
-                # Create a results summary
-                with open(os.path.join(output_dir, "results_summary.txt"), "a", encoding="utf-8") as summary_file:
-                    summary_file.write(f"{filename_base}: {generated_domain}.com\n")
+                # 1. Press Escape first to exit any text field focus
+                print("Pressing tab key to clear focus...")
+                pyautogui.press('tab')
+                time.sleep(0.5)  # Brief pause between keys
+                
+                # 2. Press Command + . to activate settings menu
+                print("Pressing Command + . to activate settings menu")
+                pyautogui.hotkey('command', '.')
+                time.sleep(2)  # Wait for menu to appear
+                
+                # 3. Try to click the "Rename this project" button using Selenium
+                try:
+                    print("Looking for 'Rename this project' button...")
+                    rename_button = bot.wait_for_element(
+                        By.XPATH, 
+                        "//button[contains(text(), 'Rename this project')]", 
+                        timeout=5
+                    )
+                    
+                    if rename_button:
+                        rename_button.click()
+                        print("Clicked 'Rename this project' button using Selenium")
+                        time.sleep(1)  # Wait for rename dialog to appear
+                        
+                        # 4. Find the input field using class-based selector and enter "test"
+                        input_selector = "input[name='newProjectName']"
+                        input_field = bot.wait_for_element(
+                            By.CSS_SELECTOR,
+                            input_selector,
+                            timeout=5
+                        )
+                        
+                        if not input_field:
+                            # Try alternative selector with class
+                            input_field = bot.wait_for_element(
+                                By.CSS_SELECTOR,
+                                "input.rounded-md[placeholder='Enter new project name']",
+                                timeout=5
+                            )
+                        
+                        if input_field:
+                            # First make sure the field is properly focused
+                            input_field.click()
+                            time.sleep(0.2)
+                            
+                            # Use keyboard shortcuts to select all existing text and delete it
+                            if bot.driver.capabilities['platformName'].lower() == 'mac':
+                                input_field.send_keys(Keys.COMMAND, 'a')  # Command+A (Select All on Mac)
+                            else:
+                                input_field.send_keys(Keys.CONTROL, 'a')  # Ctrl+A (Select All on Windows/Linux)
+                            
+                            time.sleep(0.2)
+                            input_field.send_keys(Keys.DELETE)  # Delete selected text
+                            time.sleep(0.2)
+                            
+                            # Now enter the generated domain
+                            input_field.send_keys(generated_domain)
+                            print(f"Entered '{generated_domain}' into rename field")
+                            
+                            # Press Enter to confirm
+                            input_field.send_keys(Keys.RETURN)
+                            print(f"Renamed project to '{generated_domain}'")
+                            time.sleep(2)  # Wait for rename to complete
+                            
+                            # Check for console errors after renaming
+                            has_errors, error_logs = bot.check_console_for_errors()
+                            if has_errors:
+                                print("⚠️ Detected console errors after renaming:")
+                                for log in error_logs:
+                                    print(f"  - {log.get('level')}: {log.get('message')}")
+                                print("Domain name might already be taken or invalid.")
+                                
+                                # Try a fallback - add a random number to the domain
+                                import random
+                                fallback_domain = f"{generated_domain}{random.randint(1, 999)}"
+                                print(f"Trying fallback domain: {fallback_domain}")
+                                
+                                # Try to open the rename dialog again
+                                time.sleep(1)
+                                
+                                # Press Command + . again
+                                print("Pressing Command + . again to activate settings menu")
+                                pyautogui.hotkey('command', '.')
+                                time.sleep(2)
+                                
+                                # Click rename button again
+                                rename_button = bot.wait_for_element(
+                                    By.XPATH, 
+                                    "//button[contains(text(), 'Rename this project')]", 
+                                    timeout=5
+                                )
+                                
+                                if rename_button:
+                                    rename_button.click()
+                                    print("Clicked 'Rename this project' button again")
+                                    time.sleep(1)
+                                    
+                                    # Find input field again
+                                    input_field = bot.wait_for_element(
+                                        By.CSS_SELECTOR,
+                                        input_selector,
+                                        timeout=5
+                                    )
+                                    
+                                    if input_field:
+                                        # Clear and enter fallback name
+                                        input_field.click()
+                                        time.sleep(0.2)
+                                        
+                                        # Select all and delete
+                                        if bot.driver.capabilities['platformName'].lower() == 'mac':
+                                            input_field.send_keys(Keys.COMMAND, 'a')
+                                        else:
+                                            input_field.send_keys(Keys.CONTROL, 'a')
+                                        
+                                        time.sleep(0.2)
+                                        input_field.send_keys(Keys.DELETE)
+                                        time.sleep(0.2)
+                                        
+                                        # Enter fallback domain name
+                                        input_field.send_keys(fallback_domain)
+                                        input_field.send_keys(Keys.RETURN)
+                                        print(f"Used fallback domain name: {fallback_domain}")
+                                        
+                                        # Update the log file with the fallback domain
+                                        with open(domain_log_file, "a", encoding="utf-8") as log_file:
+                                            log_file.write(f"{filename_base}: {fallback_domain}.lovable.app (FALLBACK - original was taken)\n")
+                                    
+                            else:
+                                print("No console errors detected, rename likely successful")
+                        else:
+                            print("Could not find rename input field")
+                    else:
+                        print("Could not find 'Rename this project' button, trying pyautogui fallback")
+                        # Try to click at a position where the button might be
+                        pyautogui.click(x=600, y=400)  # Adjust coordinates as needed
+                        time.sleep(1)
+                        
+                        # Try typing the domain name and pressing Enter
+                        pyautogui.write(generated_domain)
+                        pyautogui.press('enter')
+                        print(f"Used pyautogui fallback to attempt renaming to '{generated_domain}'")
+                        
+                except Exception as e:
+                    print(f"Error during rename process: {e}")
                 
                 return True
             else:
@@ -131,6 +270,12 @@ def main():
     # Create output directory
     if not os.path.exists(args.output):
         os.makedirs(args.output)
+    
+    # Create a single file to log all domains
+    domain_log_file = os.path.join(args.output, "all_domains.txt")
+    with open(domain_log_file, "w", encoding="utf-8") as f:
+        f.write("# Project ID: Domain Name\n")
+        f.write("# " + "="*50 + "\n\n")
     
     # Determine which URLs to process
     if args.url:
@@ -176,7 +321,7 @@ def main():
             # Process each URL
             for i, url in enumerate(urls, 1):
                 print(f"\nProcessing URL {i}/{len(urls)}: {url}")
-                success = process_url(url, bot, groq_processor, args.output, args.wait)
+                success = process_url(url, bot, groq_processor, args.output, args.wait, domain_log_file)
                 
                 if success:
                     results["success"] += 1
@@ -199,7 +344,7 @@ def main():
         print(f"SUMMARY: Processed {results['total']} URLs")
         print(f"Success: {results['success']}")
         print(f"Failure: {results['failure']}")
-        print(f"Results saved in: {args.output}")
+        print(f"All domains saved to: {domain_log_file}")
         print(f"{'='*50}")
     else:
         print("No URLs to process.")

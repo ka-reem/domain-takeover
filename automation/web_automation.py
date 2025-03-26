@@ -19,6 +19,9 @@ class WebsiteAutomation:
         if headless:
             self.options.add_argument("--headless")
         
+        # Enable browser logging
+        self.options.set_capability('goog:loggingPrefs', {'browser': 'ALL'})
+        
         # Performance optimizations
         self.options.add_argument("--no-sandbox")
         self.options.add_argument("--disable-dev-shm-usage")
@@ -336,6 +339,93 @@ class WebsiteAutomation:
                 pass
             return False
     
+    def extract_chat_message_to_memory(self):
+        """
+        Extract the first chat message and return it as text rather than saving to file.
+        
+        Returns:
+            str: Extracted text content or None if extraction failed
+        """
+        print("Attempting to extract chat message...")
+        
+        # Try multiple methods to find chat messages
+        try:
+            # Method 1: Look for ChatMessageContainer class directly (most reliable)
+            print("Method 1: Looking for ChatMessageContainer elements...")
+            message_containers = self.driver.find_elements(By.CSS_SELECTOR, ".ChatMessageContainer")
+            
+            if message_containers:
+                print(f"Found {len(message_containers)} message containers")
+                # Get the first container (oldest message)
+                text_content = message_containers[0].text
+                if text_content:
+                    print(f"Successfully extracted chat message of {len(text_content)} characters")
+                    return text_content
+            else:
+                print("No ChatMessageContainer elements found")
+                
+            # Method 2: Look for any elements with data-message-id attribute
+            print("Method 2: Looking for elements with data-message-id...")
+            message_elements = self.driver.find_elements(By.CSS_SELECTOR, "[data-message-id]")
+            
+            if message_elements:
+                print(f"Found {len(message_elements)} message elements with data-message-id")
+                # Get the first one
+                text_content = message_elements[0].text
+                if text_content:
+                    print(f"Successfully extracted chat message of {len(text_content)} characters")
+                    return text_content
+            else:
+                print("No elements with data-message-id found")
+                
+            # Method 3: Look for message content by class names often used in chat interfaces
+            print("Method 3: Looking for message content by class names...")
+            content_classes = [
+                ".prose", ".prose-markdown", ".break-anywhere", ".whitespace-pre-wrap", 
+                ".message-content", ".chat-message", ".user-message"
+            ]
+            
+            for class_selector in content_classes:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, class_selector)
+                if elements:
+                    print(f"Found {len(elements)} elements with selector {class_selector}")
+                    text_content = elements[0].text
+                    if text_content:
+                        print(f"Successfully extracted chat message of {len(text_content)} characters")
+                        return text_content
+            
+            # Method 4: Last resort - take any visible text from the main area
+            print("Method 4: Looking for any visible text...")
+            
+            # Look for main content area using a more general selector
+            main_areas = self.driver.find_elements(By.CSS_SELECTOR, "main")
+            if main_areas:
+                for main in main_areas:
+                    try:
+                        # Get all paragraph elements
+                        paragraphs = main.find_elements(By.TAG_NAME, "p")
+                        if paragraphs:
+                            # Collect text from all paragraphs
+                            all_text = "\n".join([p.text for p in paragraphs if p.text])
+                            if all_text:
+                                print(f"Successfully extracted {len(all_text)} characters from paragraphs")
+                                return all_text
+                    except Exception as e:
+                        print(f"Error extracting paragraphs: {e}")
+            
+            # Save a debug screenshot without saving text
+            debug_screenshot = os.path.join(os.getcwd(), "debug_screenshots", f"extract_failed_{int(time.time())}.png")
+            os.makedirs(os.path.dirname(debug_screenshot), exist_ok=True)
+            self.driver.save_screenshot(debug_screenshot)
+            print(f"Saved debug screenshot to {debug_screenshot}")
+            
+            print("All extraction methods failed")
+            return None
+            
+        except Exception as e:
+            print(f"Error extracting chat message: {e}")
+            return None
+    
     def _save_text_to_file(self, text_content, filename):
         """
         Helper method to save text content to a file.
@@ -354,3 +444,44 @@ class WebsiteAutomation:
             file.write(text_content)
         
         print(f"Successfully saved text content to {filename}")
+    
+    def get_console_logs(self):
+        """
+        Get browser console logs.
+        
+        Returns:
+            list: Console log entries
+        """
+        try:
+            logs = self.driver.get_log('browser')
+            return logs
+        except Exception as e:
+            print(f"Error getting console logs: {e}")
+            return []
+    
+    def check_console_for_errors(self, keywords=None):
+        """
+        Check browser console logs for errors or specific keywords.
+        
+        Args:
+            keywords: List of keywords to look for in console messages
+            
+        Returns:
+            tuple: (has_errors, error_messages)
+        """
+        if keywords is None:
+            keywords = ['error', 'exception', 'fail', 'already', 'taken', 'exists']
+            
+        logs = self.get_console_logs()
+        error_messages = []
+        
+        for log in logs:
+            log_level = log.get('level', '').lower()
+            log_message = log.get('message', '').lower()
+            
+            # Check for error level or keywords in message
+            if log_level == 'severe' or any(keyword.lower() in log_message for keyword in keywords):
+                error_messages.append(log)
+                
+        has_errors = len(error_messages) > 0
+        return has_errors, error_messages
