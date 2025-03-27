@@ -26,43 +26,60 @@ class GroqProcessor:
             "What short English word best summarizes this?"
         ]
     
-    def generate_url(self, text: str) -> Optional[str]:
-        """Generate a short, simple, memorable URL based on the given text"""
-        # Use a low temperature for more predictable results
-        temperature = random.uniform(0.1, 0.3)
+    def generate_url(self, text: str, custom_prompt: str = None) -> Optional[str]:
+        """
+        Generate a short, simple, memorable URL based on the given text
         
-        # Choose a prompt variation
-        prompt_prefix = random.choice(self.prompt_variations)
+        Args:
+            text: Text to base domain name on
+            custom_prompt: Optional custom prompt to use instead of default
+            
+        Returns:
+            str: Generated domain name without TLD (e.g. 'example' for 'example.com')
+        """
+        # Use a higher temperature for more variety
+        temperature = random.uniform(0.7, 0.85)
         
-        # Add an explicit instruction to generate something different if we have previous domains
-        different_instruction = ""
-        if self.previous_domains:
-            different_instruction = f"Avoid these already used names: {', '.join(list(self.previous_domains)[:10])}. "
-        
-        # Improved prompt that focuses on content-relevant but simple domain names
-        prompt = (
-            f"{prompt_prefix}. {different_instruction}\n\n"
-            f"Content description:\n{text[:300]}...\n\n"
-            "Requirements for the domain name:\n"
-            "1. Must be a SINGLE, REAL English word\n"
-            "2. Between 3-6 characters long\n"
-            "3. Must be relevant to the content\n"
-            "4. Easy to spell and pronounce\n"
-            "5. Short and memorable\n\n"
-            "Examples of good domain formats: chat, mail, zoom, slack, docs, notion\n\n"
-            "ONLY respond with the ONE word domain name. NO extensions, NO explanations."
-        )
+        if custom_prompt:
+            # Use the custom prompt if provided, injecting the text content
+            prompt = custom_prompt.replace("{TEXT}", text[:300] if "{TEXT}" in custom_prompt else text[:300])
+            
+            # If the prompt doesn't include explicit formatting instructions, add them
+            if "ONLY respond with" not in prompt and "Format your response" not in prompt:
+                prompt += "\n\nONLY respond with the domain name itself, with no explanation or commentary."
+        else:
+            # Choose a prompt variation
+            prompt_prefix = random.choice(self.prompt_variations)
+            
+            # Add an explicit instruction to generate something different if we have previous domains
+            different_instruction = ""
+            if self.previous_domains:
+                different_instruction = f"Avoid these already used names: {', '.join(list(self.previous_domains)[:10])}. "
+            
+            # Improved prompt that focuses on content-relevant domain names with variable length
+            prompt = (
+                f"{prompt_prefix}. {different_instruction}\n\n"
+                f"Content description:\n{text[:300]}...\n\n"
+                "Requirements for the domain name:\n"
+                "1. Must be a SINGLE word (real or invented)\n"
+                "2. Between 3-12 characters long\n"
+                "3. Must be relevant to the content\n"
+                "4. Easy to spell and pronounce\n"
+                "5. Memorable and distinctive\n\n"
+                "Examples of good domain formats: chat, mail, zoom, slack, docs, notion, eventbrite, dropbox\n\n"
+                "ONLY respond with the ONE word domain name. NO extensions, NO explanations."
+            )
         
         try:
-            # Call the Groq API with appropriately low temperature
+            # Call the Groq API with appropriate temperature
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You create simple domain names that are real English words related to the content."},
+                    {"role": "system", "content": "You create simple domain names related to the content."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=temperature,
-                max_tokens=5,
+                max_tokens=20,
                 top_p=0.7,
                 frequency_penalty=0.5,
                 presence_penalty=0.5,
@@ -81,15 +98,10 @@ class GroqProcessor:
             domain = domain.lower().strip()  # Lowercase and trim whitespace
             
             # If domain is empty or too short after cleaning, try again with a different prompt
-            if len(domain) < 3:
+            if not domain or len(domain) < 3:
                 print("Generated domain was too short, trying again...")
                 # Recursive call with a more specific prompt
                 return self.generate_url("Generate a simple word for: " + text[:100])
-                
-            # If domain is too long, truncate it
-            if len(domain) > 6:
-                domain = domain[:6]
-                print(f"Domain was too long, truncated to: {domain}")
                 
             # Add to our set of previous domains to avoid duplicates in future calls
             self.previous_domains.add(domain)
@@ -106,7 +118,7 @@ class GroqProcessor:
             # Generate a basic fallback if API call fails
             return "web" + str(random.randint(100, 999))
     
-    def generate_alternative_domains(self, failed_domain: str, original_text: str = None, count: int = 20) -> List[str]:
+    def generate_alternative_domains(self, failed_domain: str, original_text: str = None, count: int = 20, custom_prompt: str = None) -> List[str]:
         """
         Generate a list of alternative domain names based on the original text.
         
@@ -114,6 +126,7 @@ class GroqProcessor:
             failed_domain: The domain name that failed
             original_text: The original text content to base alternatives on
             count: Number of alternatives to generate (default: 20)
+            custom_prompt: Optional custom prompt to use instead of default
             
         Returns:
             list: List of alternative domain names
@@ -122,55 +135,66 @@ class GroqProcessor:
         
         # Generate a batch of related domain names
         domains = []
-        temperature = 0.3  # Lower temperature for more relevant outputs
+        temperature = 0.9  # Higher temperature for more variety in alternatives
         
-        # Use the original text if provided, otherwise use a generic prompt
-        if original_text:
-            # Extract key topics from the text first to focus the domain generation
-            key_topics = self._extract_key_topics(original_text)
-            text_to_use = original_text[:400]  # Shorter text to focus on main content
+        if custom_prompt:
+            # Use the custom prompt if provided, injecting the failed domain and text content
+            prompt = custom_prompt
+            prompt = prompt.replace("{FAILED_DOMAIN}", failed_domain)
+            prompt = prompt.replace("{TEXT}", original_text[:400] if original_text and "{TEXT}" in prompt else "")
+            prompt = prompt.replace("{COUNT}", str(count))
             
-            # Create a more focused prompt that emphasizes relevance to the content
-            prompt = (
-                f"The domain name '{failed_domain}' was already taken. Generate {count} highly relevant "
-                f"alternative domain names directly related to this content:\n\n"
-                f"\"{text_to_use}\"\n\n"
-                f"Key topics identified in this content: {key_topics}\n\n"
-                "Requirements for each domain name:\n"
-                "1. Single, real English words directly related to the content\n"
-                "2. Between 3-6 characters each\n"
-                "3. Must strongly connect to the main topic or purpose of the content\n"
-                "4. Easy to spell and remember\n"
-                "5. Focus on words that capture what the website actually does or offers\n"
-                "6. Each name should reflect a different aspect of the content\n\n"
-                "Format your response as a numbered list, with each item being only the domain name:\n"
-                "1. chat\n2. mail\n3. web\n... and so on."
-            )
+            # If the prompt doesn't include explicit formatting instructions, add them
+            if "Format your response" not in prompt:
+                prompt += (
+                    f"\n\nFormat your response as a simple list of {count} domain names, "
+                    "each on a separate line, with no explanations or numbering."
+                )
         else:
-            prompt = (
-                f"The domain name '{failed_domain}' was already taken. Generate {count} alternative "
-                "domain names that are simple, short English words.\n\n"
-                "Requirements for each domain name:\n"
-                "1. Single, real English words (like 'chat', 'mail', 'drive')\n"
-                "2. Between 3-6 characters each\n"
-                "3. Easy to spell and remember\n"
-                "4. Related to the concept suggested by '{failed_domain}'\n"
-                "5. No made-up words\n\n"
-                "Format your response as a numbered list, with each item being only the domain name:\n"
-                "1. chat\n2. mail\n3. web\n... and so on."
-            )
+            if original_text:
+                # Extract key topics from the text first to focus the domain generation
+                key_topics = self._extract_key_topics(original_text)
+                text_to_use = original_text[:400]  # Shorter text to focus on main content
+                
+                # Create a more focused prompt that emphasizes relevance to the content
+                prompt = (
+                    f"The domain name '{failed_domain}' was already taken. Generate {count} highly relevant "
+                    f"alternative domain names directly related to this content:\n\n"
+                    f"\"{text_to_use}\"\n\n"
+                    f"Key topics identified in this content: {key_topics}\n\n"
+                    "Requirements for each domain name:\n"
+                    "1. Single words directly related to the content\n"
+                    "2. Mix of short (3-6 characters) and longer (7-12 characters) names\n"
+                    "3. Must strongly connect to the main topic or purpose of the content\n"
+                    "4. Easy to spell and remember\n"
+                    "5. Focus on words that capture what the website actually does or offers\n"
+                    "6. Each name should reflect a different aspect of the content\n\n"
+                    "Format your response as a numbered list, with each item being only the domain name:\n"
+                    "1. chat\n2. mail\n3. web\n... and so on."
+                )
+            else:
+                prompt = (
+                    f"The domain name '{failed_domain}' was already taken. Generate {count} alternative "
+                    "domain names that are simple English words or made-up terms.\n\n"
+                    "Requirements for each domain name:\n"
+                    "1. Mix of short (3-6 chars) and longer (7-12 chars) names\n"
+                    "2. Easy to spell and remember\n"
+                    "3. Related to the concept suggested by '{failed_domain}'\n\n"
+                    "Format your response as a numbered list, with each item being only the domain name:\n"
+                    "1. chat\n2. mail\n3. web\n... and so on."
+                )
         
         try:
             # Call the API with modified parameters for more relevant results
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You generate highly relevant, topical domain names that accurately represent the content's main purpose."},
+                    {"role": "system", "content": "You generate diverse domain names with a mix of lengths (short to medium-long)."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=temperature,
-                max_tokens=200,
-                top_p=0.7,
+                max_tokens=250,
+                top_p=0.9,
                 frequency_penalty=0.6,
                 presence_penalty=0.6,
                 stream=False
@@ -182,17 +206,13 @@ class GroqProcessor:
             # Parse the list - look for numbered items or separate entries
             import re
             
-            # Try to find entries with "1. domain" pattern
+            # Try to find entries with "1. domain" pattern first
             numbered_items = re.findall(r'\d+[\.\)]\s*([a-zA-Z0-9\-]+)', response_text)
             if numbered_items:
                 for domain in numbered_items:
                     clean_domain = domain.strip().lower()
                     # Basic validation
                     if clean_domain and len(clean_domain) >= 3 and clean_domain != failed_domain:
-                        # Truncate if needed
-                        if len(clean_domain) > 6:
-                            clean_domain = clean_domain[:6]
-                        
                         domains.append(clean_domain)
                         self.previous_domains.add(clean_domain)
             else:
@@ -203,10 +223,6 @@ class GroqProcessor:
                     clean_domain = re.sub(r'[^\w\-]', '', clean_domain)
                     
                     if clean_domain and len(clean_domain) >= 3 and clean_domain != failed_domain:
-                        # Truncate if needed
-                        if len(clean_domain) > 6:
-                            clean_domain = clean_domain[:6]
-                        
                         domains.append(clean_domain)
                         self.previous_domains.add(clean_domain)
             
@@ -215,8 +231,9 @@ class GroqProcessor:
                 # Second attempt with more topic-focused approach
                 second_prompt = (
                     f"Based on this text:\n\n\"{original_text[:300]}\"\n\n"
-                    f"What are {count - len(domains)} short (3-6 letter) English words that best describe "
+                    f"What are {count - len(domains)} words that best describe "
                     f"the core purpose, functionality, or main topic of this website? "
+                    f"Mix of short (3-6 letters) and longer (7-12 letters) names. "
                     f"Focus on words that would make good domain names directly related to what this service actually does.\n"
                     f"Just list the words one per line, no explanations."
                 )
@@ -239,7 +256,7 @@ class GroqProcessor:
                     word = line.strip().lower()
                     word = re.sub(r'[^\w\-]', '', word)
                     
-                    if word and len(word) >= 3 and len(word) <= 6 and word not in domains and word != failed_domain:
+                    if word and len(word) >= 3 and word not in domains and word != failed_domain:
                         domains.append(word)
                         self.previous_domains.add(word)
                         

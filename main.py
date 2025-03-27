@@ -119,7 +119,7 @@ def attempt_rename(bot, input_selector, domain_name):
         print("Could not find rename input field")
         return False, False
 
-def try_multiple_domains(bot, groq_processor, original_domain, original_text, url, wait_time):
+def try_multiple_domains(bot, groq_processor, original_domain, original_text, url, wait_time, custom_prompt=None):
     """
     Try multiple domain names until one works.
     
@@ -130,12 +130,18 @@ def try_multiple_domains(bot, groq_processor, original_domain, original_text, ur
         original_text: The original text content to base alternatives on
         url: The current project URL
         wait_time: Time to wait for page to load
+        custom_prompt: Optional custom prompt to use for domain generation
         
     Returns:
         tuple: (success, domain_name)
     """
     # Generate a list of 20 alternative domains based on the original text
-    alternative_domains = groq_processor.generate_alternative_domains(original_domain, original_text, count=20)
+    alternative_domains = groq_processor.generate_alternative_domains(
+        original_domain, 
+        original_text, 
+        count=20, 
+        custom_prompt=custom_prompt
+    )
     
     # Find the input field (assuming we're already in it)
     input_field = bot.wait_for_element(
@@ -214,7 +220,7 @@ def try_multiple_domains(bot, groq_processor, original_domain, original_text, ur
     print(f"None of the {len(alternative_domains)} alternative domains worked")
     return False, None
 
-def process_url(url, bot, groq_processor, output_dir, wait_time, domain_log_file):
+def process_url(url, bot, groq_processor, output_dir, wait_time, domain_log_file, custom_prompt=None):
     """
     Process a single URL to extract chat messages and generate a URL.
     
@@ -225,6 +231,7 @@ def process_url(url, bot, groq_processor, output_dir, wait_time, domain_log_file
         output_dir: Directory to save output
         wait_time: Time to wait for page to load
         domain_log_file: File to log all domain names
+        custom_prompt: Optional custom prompt to use for domain generation
         
     Returns:
         bool: True if successful, False otherwise
@@ -261,9 +268,11 @@ def process_url(url, bot, groq_processor, output_dir, wait_time, domain_log_file
             success = False
             final_domain = None
             
-            # Generate URL using Groq
+            # Generate URL using Groq with optional custom prompt
             print(f"Generating domain name from extracted text using Groq...")
-            generated_domain = groq_processor.generate_url(extracted_text)
+            if custom_prompt:
+                print(f"Using custom prompt: \"{custom_prompt[:100]}...\"")
+            generated_domain = groq_processor.generate_url(extracted_text, custom_prompt)
             
             if generated_domain:
                 # Print the domain name with emphasis
@@ -307,9 +316,9 @@ def process_url(url, bot, groq_processor, output_dir, wait_time, domain_log_file
                             # First domain name was rejected, try alternatives
                             print(f"Domain '{generated_domain}' was rejected. Trying alternatives...")
                             
-                            # Pass both the failed domain and the original text to try_multiple_domains
+                            # Pass custom prompt to try_multiple_domains
                             success, final_domain = try_multiple_domains(
-                                bot, groq_processor, generated_domain, extracted_text, url, wait_time
+                                bot, groq_processor, generated_domain, extracted_text, url, wait_time, custom_prompt
                             )
                     else:
                         print("Could not find 'Rename this project' button")
@@ -358,7 +367,25 @@ def main():
                         help="Position browser on the left side of screen (default is right side)")
     parser.add_argument('--wait', type=int, default=5,
                         help="Time to wait for page to load in seconds (default: 5)")
+    parser.add_argument('--prompt', 
+                        help="Custom AI prompt for domain name generation")
+    parser.add_argument('--prompt-file',
+                        help="Path to a file containing a custom AI prompt")
     args = parser.parse_args()
+    
+    # Handle custom prompt options
+    custom_prompt = None
+    if args.prompt:
+        custom_prompt = args.prompt
+        print(f"Using custom prompt from command line: \"{custom_prompt[:100]}...\"")
+    elif args.prompt_file:
+        try:
+            with open(args.prompt_file, 'r', encoding='utf-8') as f:
+                custom_prompt = f.read().strip()
+                print(f"Using custom prompt from file: \"{custom_prompt[:100]}...\"")
+        except Exception as e:
+            print(f"Error reading prompt file: {e}")
+            print("Falling back to default prompts.")
     
     # Create output directory
     if not os.path.exists(args.output):
@@ -427,7 +454,15 @@ def main():
             # Process each URL
             for i, url in enumerate(urls, 1):
                 print(f"\nProcessing URL {i}/{len(urls)}: {url}")
-                success = process_url(url, bot, groq_processor, args.output, args.wait, domain_log_file)
+                success = process_url(
+                    url, 
+                    bot, 
+                    groq_processor, 
+                    args.output, 
+                    args.wait, 
+                    domain_log_file,
+                    custom_prompt
+                )
                 
                 if success:
                     results["success"] += 1
