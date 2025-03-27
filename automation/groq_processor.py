@@ -106,50 +106,73 @@ class GroqProcessor:
             # Generate a basic fallback if API call fails
             return "web" + str(random.randint(100, 999))
     
-    def generate_alternative_domains(self, failed_domain: str, count: int = 10) -> List[str]:
+    def generate_alternative_domains(self, failed_domain: str, original_text: str = None, count: int = 20) -> List[str]:
         """
-        Generate a list of alternative domain names related to the failed one.
+        Generate a list of alternative domain names based on the original text.
         
         Args:
             failed_domain: The domain name that failed
-            count: Number of alternatives to generate (default: 10)
+            original_text: The original text content to base alternatives on
+            count: Number of alternatives to generate (default: 20)
             
         Returns:
             list: List of alternative domain names
         """
-        print(f"Generating {count} alternatives for failed domain '{failed_domain}'...")
+        print(f"Generating {count} alternatives based on original content...")
         
         # Generate a batch of related domain names
         domains = []
-        temperature = 0.4  # Slightly higher to get more variety
+        temperature = 0.3  # Lower temperature for more relevant outputs
         
-        # Prompt to generate multiple alternative domain names at once
-        prompt = (
-            f"The domain name '{failed_domain}' was already taken. Generate {count} alternative "
-            "domain names that are simple, short English words.\n\n"
-            "Requirements for each domain name:\n"
-            "1. Single, real English words (like 'chat', 'mail', 'drive')\n"
-            "2. Between 3-6 characters each\n"
-            "3. Easy to spell and remember\n"
-            "4. Related to the concept suggested by '{failed_domain}'\n"
-            "5. No made-up words\n\n"
-            "Format your response as a numbered list, with each item being only the domain name:\n"
-            "1. chat\n2. mail\n3. web\n... and so on."
-        )
+        # Use the original text if provided, otherwise use a generic prompt
+        if original_text:
+            # Extract key topics from the text first to focus the domain generation
+            key_topics = self._extract_key_topics(original_text)
+            text_to_use = original_text[:400]  # Shorter text to focus on main content
+            
+            # Create a more focused prompt that emphasizes relevance to the content
+            prompt = (
+                f"The domain name '{failed_domain}' was already taken. Generate {count} highly relevant "
+                f"alternative domain names directly related to this content:\n\n"
+                f"\"{text_to_use}\"\n\n"
+                f"Key topics identified in this content: {key_topics}\n\n"
+                "Requirements for each domain name:\n"
+                "1. Single, real English words directly related to the content\n"
+                "2. Between 3-6 characters each\n"
+                "3. Must strongly connect to the main topic or purpose of the content\n"
+                "4. Easy to spell and remember\n"
+                "5. Focus on words that capture what the website actually does or offers\n"
+                "6. Each name should reflect a different aspect of the content\n\n"
+                "Format your response as a numbered list, with each item being only the domain name:\n"
+                "1. chat\n2. mail\n3. web\n... and so on."
+            )
+        else:
+            prompt = (
+                f"The domain name '{failed_domain}' was already taken. Generate {count} alternative "
+                "domain names that are simple, short English words.\n\n"
+                "Requirements for each domain name:\n"
+                "1. Single, real English words (like 'chat', 'mail', 'drive')\n"
+                "2. Between 3-6 characters each\n"
+                "3. Easy to spell and remember\n"
+                "4. Related to the concept suggested by '{failed_domain}'\n"
+                "5. No made-up words\n\n"
+                "Format your response as a numbered list, with each item being only the domain name:\n"
+                "1. chat\n2. mail\n3. web\n... and so on."
+            )
         
         try:
-            # Call the API to generate batch of alternatives
+            # Call the API with modified parameters for more relevant results
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "You generate lists of simple, short domain names that are real words."},
+                    {"role": "system", "content": "You generate highly relevant, topical domain names that accurately represent the content's main purpose."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=temperature,
-                max_tokens=200,  # More tokens for generating multiple domains
-                top_p=0.9,
-                frequency_penalty=0.7,  # Higher to increase variety
-                presence_penalty=0.7,  # Higher to increase variety  
+                max_tokens=200,
+                top_p=0.7,
+                frequency_penalty=0.6,
+                presence_penalty=0.6,
                 stream=False
             )
             
@@ -187,13 +210,15 @@ class GroqProcessor:
                         domains.append(clean_domain)
                         self.previous_domains.add(clean_domain)
             
-            # If we didn't get enough domains, try one more time with a different approach
-            if len(domains) < count:
-                # Second attempt with more specific instructions
+            # If we didn't get enough domains, try another approach with topic extraction
+            if len(domains) < count and original_text:
+                # Second attempt with more topic-focused approach
                 second_prompt = (
-                    f"Generate {count - len(domains)} very short domain names (3-6 letters each) "
-                    f"that are simple English words in the same category as '{failed_domain}'."
-                    "Just list the words one per line, no numbers or explanations."
+                    f"Based on this text:\n\n\"{original_text[:300]}\"\n\n"
+                    f"What are {count - len(domains)} short (3-6 letter) English words that best describe "
+                    f"the core purpose, functionality, or main topic of this website? "
+                    f"Focus on words that would make good domain names directly related to what this service actually does.\n"
+                    f"Just list the words one per line, no explanations."
                 )
                 
                 second_response = self.client.chat.completions.create(
@@ -247,6 +272,37 @@ class GroqProcessor:
         print("=" * 50 + "\n")
         
         return domains
+    
+    def _extract_key_topics(self, text: str) -> str:
+        """
+        Extract key topics from the text to help focus domain name generation.
+        
+        Args:
+            text: The text to extract topics from
+            
+        Returns:
+            str: Comma-separated list of key topics
+        """
+        try:
+            # Use Groq to extract key topics from the content
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You identify the core topics and purpose of content."},
+                    {"role": "user", "content": f"From this text, identify 5-7 key topics or themes that represent what this website/app is about. Respond with ONLY the topics as a comma-separated list of single words or short phrases:\n\n{text[:500]}"}
+                ],
+                temperature=0.1,
+                max_tokens=50,
+                stream=False
+            )
+            
+            topics = response.choices[0].message.content.strip()
+            print(f"Extracted key topics: {topics}")
+            return topics
+            
+        except Exception as e:
+            print(f"Error extracting topics: {e}")
+            return "website, application, service, platform, tool"
     
     def save_url_to_file(self, url: str, filename: str) -> bool:
         """

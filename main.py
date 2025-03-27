@@ -69,7 +69,7 @@ def attempt_rename(bot, input_selector, domain_name):
     input_field = bot.wait_for_element(
         By.CSS_SELECTOR,
         input_selector,
-        timeout=5
+        timeout=3  # Reduced from 5
     )
     
     if not input_field:
@@ -77,13 +77,13 @@ def attempt_rename(bot, input_selector, domain_name):
         input_field = bot.wait_for_element(
             By.CSS_SELECTOR,
             "input.rounded-md[placeholder='Enter new project name']",
-            timeout=5
+            timeout=3  # Reduced from 5
         )
     
     if input_field:
         # First make sure the field is properly focused
         input_field.click()
-        time.sleep(0.2)
+        time.sleep(0.1)  # Reduced from 0.2
         
         # Use keyboard shortcuts to select all existing text and delete it
         if bot.driver.capabilities['platformName'].lower() == 'mac':
@@ -91,9 +91,9 @@ def attempt_rename(bot, input_selector, domain_name):
         else:
             input_field.send_keys(Keys.CONTROL, 'a')  # Ctrl+A (Select All on Windows/Linux)
         
-        time.sleep(0.2)
+        time.sleep(0.1)  # Reduced from 0.2
         input_field.send_keys(Keys.DELETE)  # Delete selected text
-        time.sleep(0.2)
+        time.sleep(0.1)  # Reduced from 0.2
         
         # Now enter the generated domain
         input_field.send_keys(domain_name)
@@ -102,7 +102,7 @@ def attempt_rename(bot, input_selector, domain_name):
         # Press Enter to confirm
         input_field.send_keys(Keys.RETURN)
         print(f"Attempted rename to '{domain_name}'")
-        time.sleep(2)  # Wait for rename to complete
+        time.sleep(1.5)  # Reduced from 2
         
         # Check for console errors after renaming
         has_errors, error_logs = bot.check_console_for_errors()
@@ -119,35 +119,36 @@ def attempt_rename(bot, input_selector, domain_name):
         print("Could not find rename input field")
         return False, False
 
-def try_multiple_domains(bot, groq_processor, original_domain, url, wait_time):
+def try_multiple_domains(bot, groq_processor, original_domain, original_text, url, wait_time):
     """
     Try multiple domain names until one works.
     
     Args:
         bot: WebsiteAutomation instance
         groq_processor: GroqProcessor instance
-        original_domain: The original domain name that failed
+        original_domain: The domain name that failed
+        original_text: The original text content to base alternatives on
         url: The current project URL
         wait_time: Time to wait for page to load
         
     Returns:
         tuple: (success, domain_name)
     """
-    # Generate a list of alternative domains
-    alternative_domains = groq_processor.generate_alternative_domains(original_domain)
+    # Generate a list of 20 alternative domains based on the original text
+    alternative_domains = groq_processor.generate_alternative_domains(original_domain, original_text, count=20)
     
     # Find the input field (assuming we're already in it)
     input_field = bot.wait_for_element(
         By.CSS_SELECTOR,
         "input[name='newProjectName']",
-        timeout=5
+        timeout=3  # Reduced from 5
     )
     
     if not input_field:
         input_field = bot.wait_for_element(
             By.CSS_SELECTOR,
             "input.rounded-md[placeholder='Enter new project name']",
-            timeout=5
+            timeout=3  # Reduced from 5
         )
     
     if not input_field:
@@ -163,16 +164,16 @@ def try_multiple_domains(bot, groq_processor, original_domain, url, wait_time):
         
         # 1. Clear the field (select all text and delete it)
         input_field.click()
-        time.sleep(0.2)
+        time.sleep(0.1)  # Reduced from 0.2
         
         if bot.driver.capabilities['platformName'].lower() == 'mac':
             input_field.send_keys(Keys.COMMAND, 'a')
         else:
             input_field.send_keys(Keys.CONTROL, 'a')
             
-        time.sleep(0.2)
+        time.sleep(0.1)  # Reduced from 0.2
         input_field.send_keys(Keys.DELETE)
-        time.sleep(0.2)
+        time.sleep(0.1)  # Reduced from 0.2
         
         # 2. Enter the alternative domain name
         input_field.send_keys(domain)
@@ -181,7 +182,7 @@ def try_multiple_domains(bot, groq_processor, original_domain, url, wait_time):
         # 3. Press Enter to submit
         input_field.send_keys(Keys.RETURN)
         print(f"Pressed Enter to submit '{domain}'")
-        time.sleep(2)  # Wait for possible error
+        time.sleep(1.5)  # Reduced from 2
         
         # 4. Check for console errors
         has_errors, _ = bot.check_console_for_errors()
@@ -195,14 +196,14 @@ def try_multiple_domains(bot, groq_processor, original_domain, url, wait_time):
             input_field = bot.wait_for_element(
                 By.CSS_SELECTOR,
                 "input[name='newProjectName']",
-                timeout=5
+                timeout=3  # Reduced from 5
             )
             
             if not input_field:
                 input_field = bot.wait_for_element(
                     By.CSS_SELECTOR,
                     "input.rounded-md[placeholder='Enter new project name']",
-                    timeout=5
+                    timeout=3  # Reduced from 5
                 )
                 
             if not input_field:
@@ -271,12 +272,12 @@ def process_url(url, bot, groq_processor, output_dir, wait_time, domain_log_file
                 # 1. Press Escape first to exit any text field focus
                 print("Pressing tab key to clear focus...")
                 pyautogui.press('tab')
-                time.sleep(0.5)  # Brief pause between keys
+                time.sleep(0.3)  # Reduced from 0.5
                 
                 # 2. Press Command + . to activate settings menu
                 print("Pressing Command + . to activate settings menu")
                 pyautogui.hotkey('command', '.')
-                time.sleep(2)  # Wait for menu to appear
+                time.sleep(1)  # Reduced from 2
                 
                 # 3. Try to click the "Rename this project" button using Selenium
                 try:
@@ -284,13 +285,13 @@ def process_url(url, bot, groq_processor, output_dir, wait_time, domain_log_file
                     rename_button = bot.wait_for_element(
                         By.XPATH, 
                         "//button[contains(text(), 'Rename this project')]", 
-                        timeout=5
+                        timeout=3  # Reduced from 5
                     )
                     
                     if rename_button:
                         rename_button.click()
                         print("Clicked 'Rename this project' button using Selenium")
-                        time.sleep(1)  # Wait for rename dialog to appear
+                        time.sleep(0.5)  # Reduced from 1
                         
                         # 4. Attempt to rename with first generated domain
                         success, has_errors = attempt_rename(
@@ -306,9 +307,9 @@ def process_url(url, bot, groq_processor, output_dir, wait_time, domain_log_file
                             # First domain name was rejected, try alternatives
                             print(f"Domain '{generated_domain}' was rejected. Trying alternatives...")
                             
-                            # Try multiple alternative domains until one works
+                            # Pass both the failed domain and the original text to try_multiple_domains
                             success, final_domain = try_multiple_domains(
-                                bot, groq_processor, generated_domain, url, wait_time
+                                bot, groq_processor, generated_domain, extracted_text, url, wait_time
                             )
                     else:
                         print("Could not find 'Rename this project' button")
@@ -363,10 +364,19 @@ def main():
     if not os.path.exists(args.output):
         os.makedirs(args.output)
     
-    # Create a single file to log all domains
+    # Create a single file to log all domains - always in append mode to avoid overwriting
     domain_log_file = os.path.join(args.output, "all_domains.txt")
-    with open(domain_log_file, "a", encoding="utf-8") as f:  # Changed to append mode
-        f.write(f"\n# Processing batch starting at index {args.start} with limit {args.limit}\n")
+    
+    # Create the file with headers if it doesn't exist
+    if not os.path.exists(domain_log_file):
+        with open(domain_log_file, "w", encoding="utf-8") as f:
+            f.write("# Project ID: Domain Name\n")
+            f.write("# " + "="*50 + "\n")
+    
+    # Always append to existing file
+    with open(domain_log_file, "a", encoding="utf-8") as f:
+        f.write(f"\n# New processing batch starting at index {args.start} with limit {args.limit}\n")
+        f.write(f"# {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("# " + "="*50 + "\n\n")
     
     # Determine which URLs to process
@@ -427,7 +437,7 @@ def main():
                 # Small delay between URLs
                 if i < len(urls):
                     print("Waiting before processing next URL...")
-                    time.sleep(3)
+                    time.sleep(1.5)  # Reduced from 3
                 
         except Exception as e:
             print(f"An error occurred: {e}")

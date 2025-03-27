@@ -57,10 +57,10 @@ class WebsiteAutomation:
             self.driver.set_window_size(width, height)
             print(f"Set browser window size to {width}x{height}")
         
-        # Set page load timeout
-        self.driver.set_page_load_timeout(15)
-        # Set default script timeout
-        self.driver.set_script_timeout(10)
+        # Set page load timeout - reduced from 15 seconds
+        self.driver.set_page_load_timeout(10)
+        # Set default script timeout - reduced from 10 seconds
+        self.driver.set_script_timeout(7)
     
     # Core navigation methods
     def start(self):
@@ -86,8 +86,8 @@ class WebsiteAutomation:
             print(f"Navigating to {url}")
             self.driver.get(url)
             
-            # Wait briefly
-            time.sleep(2)
+            # Wait briefly - reduced from 2 seconds
+            time.sleep(1.5)
             
             # Verify we reached the intended URL or at least the right domain
             current_url = self.driver.current_url
@@ -143,7 +143,7 @@ class WebsiteAutomation:
             print("Browser session ended")
     
     # Element interaction methods
-    def wait_for_element(self, by, value, timeout=5):
+    def wait_for_element(self, by, value, timeout=3):  # Default timeout reduced from 5
         """Wait for an element to be present on the page."""
         try:
             element = WebDriverWait(self.driver, timeout).until(
@@ -154,7 +154,7 @@ class WebsiteAutomation:
             print(f"Timed out waiting for element {value}")
             return None
     
-    def click_element(self, by, value, timeout=10):
+    def click_element(self, by, value, timeout=7):  # Default timeout reduced from 10
         """Click on an element."""
         element = self.wait_for_element(by, value, timeout)
         if element:
