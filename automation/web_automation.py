@@ -485,3 +485,156 @@ class WebsiteAutomation:
                 
         has_errors = len(error_messages) > 0
         return has_errors, error_messages
+    
+    def extract_project_description(self, timeout=5):
+        """
+        Extract the project description from the page.
+        
+        Args:
+            timeout: Maximum time to wait for description element
+            
+        Returns:
+            str: Extracted description or empty string if not found
+        """
+        try:
+            print("Attempting to extract project description...")
+            
+            # Try multiple selectors that might contain the description
+            description_selectors = [
+                "//div[contains(@class, 'prose')]/p",
+                "//div[contains(@class, 'description')]/p",
+                "//p[contains(@class, 'description')]",
+                "//div[@role='dialog']//p",
+                "//div[@data-radix-dialog-content]//p"
+            ]
+            
+            for selector in description_selectors:
+                elements = self.driver.find_elements(By.XPATH, selector)
+                if elements:
+                    # Get text from the first paragraph element
+                    description = elements[0].text.strip()
+                    if description:
+                        print(f"Found description: '{description[:50]}...'")
+                        return description
+            
+            print("Could not find project description")
+            return ""
+            
+        except Exception as e:
+            print(f"Error extracting project description: {e}")
+            return ""
+    
+    def extract_custom_url(self, timeout=5):
+        """
+        Extract the custom URL in the format "(name).lovable.app" from the page.
+        Priority is given to the format with SVG icon and potential "Not published" status.
+        
+        Args:
+            timeout: Maximum time to wait for URL element
+            
+        Returns:
+            str: Extracted URL or empty string if not found
+        """
+        try:
+            print("Attempting to extract custom URL...")
+            
+            # First priority: Look for the format with SVG icon and potential "Not published" status
+            url_xpath_priority = "//li[contains(@class, 'mt-2')]//span[contains(@class, 'flex')]//p[contains(text(), 'lovable.app')]"
+            url_elements = self.driver.find_elements(By.XPATH, url_xpath_priority)
+            
+            if url_elements:
+                # Extract just the URL part without the "Not published" text
+                full_text = url_elements[0].text.strip()
+                url_parts = full_text.split('\n')  # Split by newline to separate URL from status
+                url_text = url_parts[0].strip()
+                
+                print(f"Found URL with priority format: {url_text}")
+                # Check if it contains "lovable.app"
+                if "lovable.app" in url_text:
+                    return url_text
+            
+            # Second priority: Standard list item with lovable.app text
+            url_xpath = "//li[contains(@class, 'mt-2')]//span[contains(text(), 'lovable.app')]"
+            url_elements = self.driver.find_elements(By.XPATH, url_xpath)
+            
+            if url_elements:
+                url_text = url_elements[0].text.strip()
+                print(f"Found URL with standard format: {url_text}")
+                return url_text
+            
+            # Third priority: Try other selectors that might find the URL
+            alternate_selectors = [
+                "//p[contains(text(), 'lovable.app')]",
+                "//span[contains(text(), 'lovable.app')]",
+                "//a[contains(@href, 'lovable.app')]",
+                "//div[contains(@class, 'site-url')]//span",
+                "//text()[contains(., 'lovable.app')]/.."
+            ]
+            
+            for selector in alternate_selectors:
+                elements = self.driver.find_elements(By.XPATH, selector)
+                if elements:
+                    for element in elements:
+                        url_text = element.text.strip()
+                        if "lovable.app" in url_text:
+                            # If there's a newline, take just the first line (the URL)
+                            if "\n" in url_text:
+                                url_text = url_text.split("\n")[0].strip()
+                            
+                            print(f"Found URL with alternate selector: {url_text}")
+                            return url_text
+            
+            # Last resort: Look for any text containing lovable.app in the page
+            page_source = self.driver.page_source.lower()
+            import re
+            url_match = re.search(r'([a-z0-9-]+)\.lovable\.app', page_source)
+            if url_match:
+                url_text = f"{url_match.group(1)}.lovable.app"
+                print(f"Found URL in page source: {url_text}")
+                return url_text
+            
+            print("Could not find custom URL")
+            return ""
+            
+        except Exception as e:
+            print(f"Error extracting custom URL: {e}")
+            # Take a screenshot for debugging
+            try:
+                debug_dir = os.path.join(os.getcwd(), "debug_screenshots")
+                os.makedirs(debug_dir, exist_ok=True)
+                screenshot_path = os.path.join(debug_dir, f"url_extract_error_{int(time.time())}.png")
+                self.driver.save_screenshot(screenshot_path)
+                print(f"Saved error screenshot to {screenshot_path}")
+            except:
+                pass
+            return ""
+    
+    def save_project_info_to_file(self, url, description, filename):
+        """
+        Save the project URL and description to a file.
+        
+        Args:
+            url: The custom URL
+            description: The project description
+            filename: Output file path
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            # Create directory if it doesn't exist
+            directory = os.path.dirname(filename)
+            if directory and not os.path.exists(directory):
+                os.makedirs(directory)
+                
+            # Write URL and description to file in append mode
+            with open(filename, 'a', encoding='utf-8') as file:
+                file.write(f"URL: {url}\n")
+                file.write(f"Description: {description}\n")
+                file.write("-" * 50 + "\n")
+                
+            print(f"Successfully saved project info to {filename}")
+            return True
+        except Exception as e:
+            print(f"Failed to save project info to file: {e}")
+            return False
