@@ -49,7 +49,7 @@ def read_domains_from_txt(txt_path):
     return domains
 
 def check_for_name_taken(bot):
-    """Check for ANY console errors that might indicate name is unavailable."""
+    """Check for ANY console errors after renaming."""
     try:
         logs = bot.driver.get_log('browser')
         # If there are ANY console logs after rename, consider it an error
@@ -75,6 +75,12 @@ def attempt_rename(bot, domain_name):
     )
     
     if input_field:
+        # Clear console logs before attempting rename
+        try:
+            bot.driver.get_log('browser')  # This clears the logs buffer
+        except:
+            pass
+            
         # Focus and clear field
         input_field.click()
         time.sleep(0.1)
@@ -94,22 +100,29 @@ def attempt_rename(bot, domain_name):
         input_field.send_keys(Keys.RETURN)
         print(f"Attempted rename to '{domain_name}'")
         
-        # Clear console logs before checking for errors
-        try:
-            bot.driver.get_log('browser')  # This clears the logs buffer
-        except:
-            pass
-            
-        # Wait a shorter time for errors to appear in console
-        time.sleep(0.4) 
+        # Increase wait time for errors to appear in console - this helps catch delayed errors
+        time.sleep(0.8)  # Increased from 0.4 to 0.8 seconds
         
-        # Check for ANY console errors after rename attempt
+        # Check for ANY console errors after rename attempt - this is the generalized approach
         if check_for_name_taken(bot):
             print(f"❌ Domain '{domain_name}' appears to be unavailable")
             return False, "name_taken"
         
-        # If we get here, no console errors were found
-        print("No console errors detected, rename successful")
+        # # Also check if error message appears in the DOM
+        # try:
+        #     error_element = bot.wait_for_element(
+        #         By.XPATH,
+        #         "//div[contains(@class, 'error') or contains(@class, 'alert') or contains(text(), 'taken') or contains(text(), 'invalid')]",
+        #         timeout=0.3
+        #     )
+        #     if error_element:
+        #         print(f"❌ Error message found in DOM: {error_element.text}")
+        #         return False, "name_taken"
+        # except:
+        #     pass
+        
+        # If we get here, no errors were found
+        print("No errors detected, rename successful")
         return True, None
     else:
         print("Could not find rename input field")
@@ -180,28 +193,36 @@ def takeover_domain(url, bot, domains_list, output_file, wait_time=5):
                 )
                 
                 if input_field:
+                    # Clear console logs before this attempt
+                    try:
+                        bot.driver.get_log('browser')  # This clears the logs buffer
+                    except:
+                        pass
+                        
                     # Enter domain directly
+                    # First clear any existing text
+                    if bot.driver.capabilities['platformName'].lower() == 'mac':
+                        input_field.send_keys(Keys.COMMAND, 'a')
+                    else:
+                        input_field.send_keys(Keys.CONTROL, 'a')
+                    input_field.send_keys(Keys.DELETE)
+                    time.sleep(0.1)
+                    
+                    # Enter the new domain
                     input_field.send_keys(domain)
                     print(f"Entered '{domain}' directly into input field")
                     input_field.send_keys(Keys.RETURN)
                     print(f"Attempted rename to '{domain}'")
                     
-                    # Wait and check for errors
-                    time.sleep(0.4)
+                    # Wait and check for errors - increased delay
+                    time.sleep(0.8)  # Increased from 0.4 to 0.8 seconds
                     if check_for_name_taken(bot):
                         print(f"❌ Domain '{domain}' appears to be unavailable")
-                        # Keep flag on and clear the text for next domain
+                        # Keep flag on for next domain
                         previous_name_failed = True
-                        # Clear text field
-                        if bot.driver.capabilities['platformName'].lower() == 'mac':
-                            input_field.send_keys(Keys.COMMAND, 'a')
-                        else:
-                            input_field.send_keys(Keys.CONTROL, 'a')
-                        input_field.send_keys(Keys.DELETE)
-                        time.sleep(0.1)
                         continue
                     else:
-                        print("✅ Successfully renamed project to '{domain}'")
+                        print(f"✅ Successfully renamed project to '{domain}'")
                         successful_domains.append(domain)
                         # Record successful domain
                         with open("successful_domains.txt", "a", encoding="utf-8") as sf:
@@ -213,6 +234,10 @@ def takeover_domain(url, bot, domains_list, output_file, wait_time=5):
                     # If we can't find the input field, reset and try normal flow
                     print("Could not find input field, resetting workflow")
                     previous_name_failed = False
+                    
+                    # Try to recover by closing dialogs
+                    pyautogui.press('escape')
+                    time.sleep(0.5)
             
             # Only reaches here if we clicked the rename button or are starting fresh
             rename_success, error_type = attempt_rename(bot, domain)
@@ -241,7 +266,8 @@ def takeover_domain(url, bot, domains_list, output_file, wait_time=5):
                         pyautogui.hotkey('ctrl', 'a')  # Select all text
                         pyautogui.press('delete')  # Delete selected text
                     
-                    time.sleep(0.1)
+                    # Add additional delay after error and clearing text
+                    time.sleep(0.5)  # Increased from 0.1 to 0.5 seconds
                 elif error_type == "no_field":
                     # If we couldn't find the input field, reset workflow
                     print("Could not find input field, pressing escape")
