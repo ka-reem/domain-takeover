@@ -48,6 +48,23 @@ def read_domains_from_txt(txt_path):
         print(f"Error reading text file: {e}")
     return domains
 
+def check_for_name_taken(bot):
+    """Check for ANY console errors that might indicate name is unavailable."""
+    try:
+        logs = bot.driver.get_log('browser')
+        # If there are ANY console logs after rename, consider it an error
+        if logs and len(logs) > 0:
+            print(f"⚠️ Console logs detected after rename attempt ({len(logs)} entries)")
+            # Show the first error for debugging
+            if logs:
+                print(f"  Sample: {logs[0].get('message', 'No message')[:100]}...")
+            return True
+        return False
+    except Exception as e:
+        print(f"Error checking console logs: {e}")
+        # Be safe and assume there was an error
+        return True
+
 def attempt_rename(bot, domain_name):
     """Attempt to rename a project with the given domain name."""
     # Find the input field
@@ -76,22 +93,27 @@ def attempt_rename(bot, domain_name):
         print(f"Entered '{domain_name}' into rename field")
         input_field.send_keys(Keys.RETURN)
         print(f"Attempted rename to '{domain_name}'")
-        time.sleep(1.5)
         
-        # Check for console errors
-        has_errors, error_logs = bot.check_console_for_errors()
-        if has_errors:
-            print("⚠️ Detected console errors after renaming:")
-            for log in error_logs[:2]:  # Show first 2 errors only
-                print(f"  - {log.get('level')}: {log.get('message')}")
-            print("Domain name might already be taken or invalid.")
-            return False, True
-        else:
-            print("No console errors detected, rename successful")
-            return True, False
+        # Clear console logs before checking for errors
+        try:
+            bot.driver.get_log('browser')  # This clears the logs buffer
+        except:
+            pass
+            
+        # Wait a shorter time for errors to appear in console
+        time.sleep(0.4) 
+        
+        # Check for ANY console errors after rename attempt
+        if check_for_name_taken(bot):
+            print(f"❌ Domain '{domain_name}' appears to be unavailable")
+            return False, "name_taken"
+        
+        # If we get here, no console errors were found
+        print("No console errors detected, rename successful")
+        return True, None
     else:
         print("Could not find rename input field")
-        return False, False
+        return False, "no_field"
 
 def takeover_domain(url, bot, domains_list, output_file, wait_time=5):
     """Process a URL to take over its domain."""
@@ -117,35 +139,83 @@ def takeover_domain(url, bot, domains_list, output_file, wait_time=5):
         time.sleep(1)
         
         successful_domains = []
+        previous_name_failed = False  # Flag to track if previous domain name was unavailable
         
         # Try each domain name
         for i, domain in enumerate(domains_list, 1):
             print(f"\nAttempting domain name {i}/{len(domains_list)}: {domain}")
             
-            # Find and click "Rename project" button
-            print("Looking for 'Rename project' button...")
-            rename_button = None
+            # Only look for rename button if the previous attempt wasn't a failed name
+            if not previous_name_failed:
+                # Find and click "Rename project" button
+                print("Looking for 'Rename project' button...")
+                rename_button = None
+                
+                # Try different methods to find the button
+                for selector in [
+                    (By.XPATH, '//*[@id="radix-:r4n:-content-settings"]/div/button[1]'),
+                    (By.XPATH, "//button[contains(text(), 'Rename project')]"),
+                    (By.CSS_SELECTOR, "button.hover\\:bg-neutral-100")
+                ]:
+                    rename_button = bot.wait_for_element(selector[0], selector[1], timeout=1)
+                    if rename_button:
+                        break
+                
+                if not rename_button:
+                    print("Could not find 'Rename project' button")
+                    continue
+                
+                rename_button.click()
+                print("Clicked 'Rename project' button")
+                time.sleep(0.5)
+            else:
+                # If previous name failed, the input field is already open and focused
+                print("Input field already open from previous failed attempt - skipping button click")
+                
+                # Try to find the input field to enter text directly
+                input_field = bot.wait_for_element(
+                    By.CSS_SELECTOR,
+                    "input[name='newProjectName'], input.rounded-md[placeholder='Enter new project name']",
+                    timeout=2
+                )
+                
+                if input_field:
+                    # Enter domain directly
+                    input_field.send_keys(domain)
+                    print(f"Entered '{domain}' directly into input field")
+                    input_field.send_keys(Keys.RETURN)
+                    print(f"Attempted rename to '{domain}'")
+                    
+                    # Wait and check for errors
+                    time.sleep(0.4)
+                    if check_for_name_taken(bot):
+                        print(f"❌ Domain '{domain}' appears to be unavailable")
+                        # Keep flag on and clear the text for next domain
+                        previous_name_failed = True
+                        # Clear text field
+                        if bot.driver.capabilities['platformName'].lower() == 'mac':
+                            input_field.send_keys(Keys.COMMAND, 'a')
+                        else:
+                            input_field.send_keys(Keys.CONTROL, 'a')
+                        input_field.send_keys(Keys.DELETE)
+                        time.sleep(0.1)
+                        continue
+                    else:
+                        print("✅ Successfully renamed project to '{domain}'")
+                        successful_domains.append(domain)
+                        # Record successful domain
+                        with open("successful_domains.txt", "a", encoding="utf-8") as sf:
+                            sf.write(f"{domain}\n")
+                        # Reset flag for next domain
+                        previous_name_failed = False
+                        continue
+                else:
+                    # If we can't find the input field, reset and try normal flow
+                    print("Could not find input field, resetting workflow")
+                    previous_name_failed = False
             
-            # Try different methods to find the button
-            for selector in [
-                (By.XPATH, '//*[@id="radix-:r4n:-content-settings"]/div/button[1]'),
-                (By.XPATH, "//button[contains(text(), 'Rename project')]"),
-                (By.CSS_SELECTOR, "button.hover\\:bg-neutral-100")
-            ]:
-                rename_button = bot.wait_for_element(selector[0], selector[1], timeout=1)
-                if rename_button:
-                    break
-            
-            if not rename_button:
-                print("Could not find 'Rename project' button")
-                continue
-            
-            rename_button.click()
-            print("Clicked 'Rename project' button")
-            time.sleep(0.5)
-            
-            # Attempt rename
-            rename_success, has_errors = attempt_rename(bot, domain)
+            # Only reaches here if we clicked the rename button or are starting fresh
+            rename_success, error_type = attempt_rename(bot, domain)
             
             if rename_success:
                 print(f"✅ Successfully renamed project to '{domain}'")
@@ -155,21 +225,29 @@ def takeover_domain(url, bot, domains_list, output_file, wait_time=5):
                 with open("successful_domains.txt", "a", encoding="utf-8") as sf:
                     sf.write(f"{domain}\n")
                 
-                # Don't do anything special after success, the settings menu should still be open
-                # Just continue to the next iteration where we'll click "Rename project" again
-                
+                # Reset the flag for next domain
+                previous_name_failed = False
             else:
-                if has_errors:
-                    print(f"❌ Domain '{domain}' was rejected, closing dialog and retrying...")
-                    # Just press escape to close the dialog and try the next domain
+                if error_type == "name_taken":
+                    # Domain unavailable, set flag to skip button click next time
+                    print("Clearing text field for next domain")
+                    previous_name_failed = True
+                    
+                    # Use keyboard shortcuts to clear text
+                    if bot.driver.capabilities['platformName'].lower() == 'mac':
+                        pyautogui.hotkey('command', 'a')  # Select all text
+                        pyautogui.press('delete')  # Delete selected text
+                    else:
+                        pyautogui.hotkey('ctrl', 'a')  # Select all text
+                        pyautogui.press('delete')  # Delete selected text
+                    
+                    time.sleep(0.1)
+                elif error_type == "no_field":
+                    # If we couldn't find the input field, reset workflow
+                    print("Could not find input field, pressing escape")
                     pyautogui.press('escape')
-                else:
-                    print("Rename input field issue, trying to recover...")
-                    # Try to escape any dialog and continue
-                    pyautogui.press('escape')
-                
-                # Give time for dialog to close
-                time.sleep(1)
+                    time.sleep(0.5)
+                    previous_name_failed = False
         
         # After trying all domains, we don't need to save changes
         # The changes are applied immediately after each successful rename
